@@ -1,0 +1,8 @@
+# Source is excluded from publish — ship dist/ only.
+# The generated.d.ts is published for type consumers.
+src/__tests__/
+tsup.config.ts
+tsconfig.json
+openapi.yaml
+.gitignore
+.npmignore

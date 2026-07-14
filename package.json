@@ -1,0 +1,56 @@
+{
+  "name": "@harmony-ai-solutions/soulbits-api-client",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "First-party TypeScript/JavaScript client for the Soulbits REST API — auth, inference, models, audio, and more",
+  "keywords": ["soulbits", "harmony-ai", "api-client", "openapi", "typescript"],
+  "homepage": "https://github.com/harmony-ai-solutions/soulbits-api-client-js#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/harmony-ai-solutions/soulbits-api-client-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/harmony-ai-solutions/soulbits-api-client-js/issues"
+  },
+  "license": "MIT",
+  "author": "Harmony AI Solutions <dev@soulbits.app>",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "src/generated.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "gen": "openapi-typescript openapi.yaml -o src/generated.d.ts",
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.13.8"
+  }
+}
