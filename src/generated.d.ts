@@ -1010,7 +1010,7 @@ export interface paths {
         put?: never;
         /**
          * Connect a cloud session
-         * @description Acquires a connect lock, assigns a warm-pool HL task, and schedules a 30s connect timeout (cancelled when `/v1/session/connected` fires). Routed in Valkey by userID.
+         * @description Asynchronous session provisioning. Returns the current session state — `provisioning` (202) while the broker prepares the task, `ready` (200) with a proxy endpoint when the session is reachable, or `failed` (503) with a failure reason on terminal error. The client polls this same endpoint with backoff respecting `retry_after_ms`. Idempotent per user — concurrent calls return the same session. Routed by userID in Valkey.
          */
         post: {
             parameters: {
@@ -1028,8 +1028,17 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Session connect response. */
+                /** @description Session is ready — the client can open a WebSocket to the `proxy_endpoint`. */
                 200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SessionConnectResponse"];
+                    };
+                };
+                /** @description Session is provisioning — retry after `retry_after_ms` milliseconds. */
+                202: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -1039,6 +1048,15 @@ export interface paths {
                 };
                 401: components["responses"]["Unauthorized"];
                 429: components["responses"]["RateLimited"];
+                /** @description Session provisioning failed — see `failure_reason`. */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SessionConnectResponse"];
+                    };
+                };
             };
         };
         delete?: never;
@@ -2038,10 +2056,14 @@ export interface components {
         SessionConnectResponse: {
             /** Format: uuid */
             session_id: string;
-            /** @description Conduct proxy WebSocket base URL for this session (e.g. `wss://connect.soulbits.app`). */
-            proxy_endpoint: string;
+            /** @description Conduct proxy WebSocket base URL for this session (e.g. `wss://connect.soulbits.app`). Present when status is `ready` or `active`. */
+            proxy_endpoint?: string;
             /** @enum {string} */
-            status: "active" | "connecting";
+            status: "provisioning" | "ready" | "active" | "failed";
+            /** @description Milliseconds to wait before polling again. Present when status is `provisioning`. */
+            retry_after_ms?: number;
+            /** @description Human-readable failure reason. Present when status is `failed`. */
+            failure_reason?: string;
             /** @description HL image version assigned from the warm pool. */
             image_version?: string | null;
         };
