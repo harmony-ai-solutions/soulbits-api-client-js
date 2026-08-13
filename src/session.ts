@@ -1,5 +1,5 @@
 import type { FetchClient, components } from './types.js';
-import { APIError, unwrap } from './errors.js';
+import { APIError, DeviceAuthRequiredError, unwrap } from './errors.js';
 
 type SessionConnectResponse = components['schemas']['SessionConnectResponse'];
 
@@ -28,15 +28,18 @@ export function createSessionAPI(client: FetchClient) {
      * 200 (ready), 202 (provisioning), or 503 (failed). Use {@link connectPoll}
      * for a higher-level polling loop.
      */
-    connect(version?: string) {
+    connect(version?: string, deviceId?: string) {
+      const body: { version?: string; device_id?: string } = {};
+      if (version) body.version = version;
+      if (deviceId) body.device_id = deviceId;
       return client.POST('/v1/session/connect', {
-        body: version ? { version } : undefined,
+        body: Object.keys(body).length > 0 ? body : undefined,
       });
     },
 
     /** Convenience: connect and throw on error (no polling). */
-    async connectOrThrow(version?: string) {
-      return unwrap(await this.connect(version));
+    async connectOrThrow(version?: string, deviceId?: string) {
+      return unwrap(await this.connect(version, deviceId));
     },
 
     /**
@@ -50,9 +53,13 @@ export function createSessionAPI(client: FetchClient) {
      *
      * @param version - Optional HL image version.
      * @param options - Polling configuration.
+     * @param deviceId - Optional per-install device identity (D-DEV-04 gate).
      * @returns The final `SessionConnectResponse` with status `ready` or `active`.
+     * @throws {DeviceAuthRequiredError} if the broker rejects the device with 403
+     *   `device_authorization_required` — the caller must complete the email
+     *   auth-code flow before retrying.
      */
-    async connectPoll(version?: string, options?: ConnectPollOptions): Promise<SessionConnectResponse> {
+    async connectPoll(version?: string, options?: ConnectPollOptions, deviceId?: string): Promise<SessionConnectResponse> {
       const maxRetries = options?.maxRetries ?? 120;
       const timeoutMs = options?.timeoutMs;
       const startTime = Date.now();
@@ -65,10 +72,17 @@ export function createSessionAPI(client: FetchClient) {
           );
         }
 
-        const { data, error, response } = await this.connect(version);
+        const { data, error, response } = await this.connect(version, deviceId);
 
         // ── Handle non-2xx responses ────────────────────────────────────
         if (error) {
+          // 403: Device authorization required — terminal, not retryable
+          if (response.status === 403) {
+            const errBody = error as Record<string, unknown>;
+            if (errBody.error === 'device_authorization_required') {
+              throw new DeviceAuthRequiredError();
+            }
+          }
           // 503: Session provisioning failed — body is SessionConnectResponse
           if (response.status === 503) {
             const errBody = error as Record<string, unknown>;
@@ -107,8 +121,8 @@ export function createSessionAPI(client: FetchClient) {
     },
 
     /** Convenience: {@link connectPoll} with throw semantics (alias for consistency). */
-    async connectPollOrThrow(version?: string, options?: ConnectPollOptions): Promise<SessionConnectResponse> {
-      return this.connectPoll(version, options);
+    async connectPollOrThrow(version?: string, options?: ConnectPollOptions, deviceId?: string): Promise<SessionConnectResponse> {
+      return this.connectPoll(version, options, deviceId);
     },
 
     /**

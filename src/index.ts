@@ -31,7 +31,7 @@ export type {
 } from './types.js';
 
 export type { ClientOptions } from './config.js';
-export { APIError } from './errors.js';
+export { APIError, DeviceAuthRequiredError } from './errors.js';
 
 // ── Sub-API types ──────────────────────────────────────────────────────────
 export type { AccountAPI } from './account.js';

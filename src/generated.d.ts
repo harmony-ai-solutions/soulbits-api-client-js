@@ -1024,6 +1024,8 @@ export interface paths {
                     "application/json": {
                         /** @description Optional HL image version. */
                         version?: string;
+                        /** @description Per-install device identity for the D-DEV-04 authorization gate. The broker refuses to provision for unauthorized devices (403 device_authorization_required). Absent on first connect triggers the email auth-code flow. */
+                        device_id?: string;
                     };
                 };
             };
@@ -1047,6 +1049,18 @@ export interface paths {
                     };
                 };
                 401: components["responses"]["Unauthorized"];
+                /** @description Device authorization required — the connecting device must complete the email auth-code flow before a session can be provisioned. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            error?: "device_authorization_required";
+                        };
+                    };
+                };
                 429: components["responses"]["RateLimited"];
                 /** @description Session provisioning failed — see `failure_reason`. */
                 503: {

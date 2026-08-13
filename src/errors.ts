@@ -56,6 +56,19 @@ export class APIError extends Error {
 }
 
 /**
+ * Thrown when POST /v1/session/connect returns 403
+ * `{"error":"device_authorization_required"}` (D-DEV-04 gate). NOT a generic
+ * failure: the connecting device must complete the email auth-code flow before
+ * the broker provisions a session. Terminal — `connectPoll` never retries it.
+ */
+export class DeviceAuthRequiredError extends Error {
+  constructor() {
+    super('device_authorization_required');
+    this.name = 'DeviceAuthRequiredError';
+  }
+}
+
+/**
  * Unwrap an openapi-fetch result.
  * Returns `data` if present, otherwise throws `APIError`.
  */
