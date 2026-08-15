@@ -2,8 +2,8 @@
  * Soulbits API Client — first-party TypeScript/JavaScript client.
  *
  * Provides a {@link createClient} factory that returns typed sub-APIs for
- * auth, account, API keys, session, subscription, models, inference, and
- * audio.
+ * auth, account, API keys, session, subscription, devices, models, inference,
+ * and audio.
  *
  * ## Quick start
  *
@@ -38,6 +38,14 @@ export type { AccountAPI } from './account.js';
 export type { APIKeysAPI } from './apikeys.js';
 export type { SessionAPI } from './session.js';
 export type { SubscriptionAPI } from './subscription.js';
+export type { DevicesAPI } from './devices.js';
+export type {
+  DeviceDTO,
+  DeviceListItemDTO,
+  DeviceAuthorizationStatusDTO,
+  ApproveDeviceResult,
+  RegisterDeviceParams,
+} from './devices.js';
 export type { ModelsAPI } from './models.js';
 export type { InferenceAPI } from './inference.js';
 

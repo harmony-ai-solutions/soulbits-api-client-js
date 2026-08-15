@@ -1204,6 +1204,115 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's devices
+         * @description Returns the current user's registered devices (no `user_id` per item — they are all the caller's).
+         */
+        get: operations["listDevices"];
+        put?: never;
+        /**
+         * Register or refresh a device
+         * @description Registers a client install (or refreshes an existing one, e.g. a new
+         *     push token). Devices must be authorized before cloud sessions can be
+         *     provisioned for them — see `/v1/session/connect` (403
+         *     `device_authorization_required`) and the `/v1/devices/authorize` flow.
+         */
+        post: operations["registerDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/{device_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a device
+         * @description Revokes a device's authorization and removes it from the user's device list.
+         */
+        delete: operations["revokeDevice"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request an email auth code + approval link, or verify a code
+         * @description Without `code`: mails the user a 6-digit code (fallback manual entry) AND an approval button linking to the portal device-approve page. Returns 202. With `code`: verifies the code and marks the device authorized. Returns 200.
+         */
+        post: operations["authorizeDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a device via emailed approval token
+         * @description Redeems the high-entropy approval token from the email button URL. The authenticated session user must match the user the token was issued for. Marks the device authorized and consumes both pending secrets (code and token).
+         */
+        post: operations["approveDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/authorize/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Poll device authorization state
+         * @description App-polling endpoint for the device auth flow. Returns whether the
+         *     device is authorized and whether a code/token pair is still
+         *     outstanding for it.
+         */
+        get: operations["getDeviceAuthorizationStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/subscription/tiers": {
         parameters: {
             query?: never;
@@ -2095,6 +2204,74 @@ export interface components {
             default: string;
             default_image: string;
         };
+        /**
+         * @description A registered client device. `push_token`, `authorized_at` and
+         *     `last_seen_at` are nullable until observed by the server.
+         */
+        Device: {
+            /** @description Per-install device identity. */
+            device_id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** @enum {string} */
+            platform: "android" | "ios" | "web";
+            /** @description Push notification token for this install; `null` when push is not registered. */
+            push_token: string | null;
+            authorized: boolean;
+            /** @description When the device was authorized; `null` until authorized. */
+            authorized_at?: components["schemas"]["RFC3339Timestamp"] | null;
+            last_seen_at?: components["schemas"]["RFC3339Timestamp"] | null;
+            created_at: components["schemas"]["RFC3339Timestamp"];
+            updated_at: components["schemas"]["RFC3339Timestamp"];
+        };
+        /** @description Device list item — same shape as `Device` minus `user_id` (a caller only ever lists their own devices). */
+        DeviceListItem: {
+            /** @description Per-install device identity. */
+            device_id: string;
+            /** @enum {string} */
+            platform: "android" | "ios" | "web";
+            push_token: string | null;
+            authorized: boolean;
+            authorized_at?: components["schemas"]["RFC3339Timestamp"] | null;
+            last_seen_at?: components["schemas"]["RFC3339Timestamp"] | null;
+            created_at: components["schemas"]["RFC3339Timestamp"];
+            updated_at: components["schemas"]["RFC3339Timestamp"];
+        };
+        /** @description Register (or refresh) a device install. Omit/`null` `push_token` to clear push registration. */
+        RegisterDeviceRequest: {
+            /** @description Per-install device identity (client-generated UUID). */
+            device_id: string;
+            /** @enum {string} */
+            platform: "android" | "ios" | "web";
+            /** @description Push notification token for this install. */
+            push_token?: string | null;
+        };
+        /**
+         * @description Dual-mode request/verify body. Without `code` the server mails the
+         *     6-digit code plus the approval button link (202). With `code` the
+         *     server verifies it and marks the device authorized (200).
+         */
+        AuthorizeDeviceRequest: {
+            device_id: string;
+            /** @description 6-digit email auth code. Omit to request the code + approval link. */
+            code?: string;
+        };
+        /** @description Redeems the high-entropy approval token from the emailed button URL. */
+        ApproveDeviceRequest: {
+            /** @description High-entropy base64url approval token (43 chars) from the email button URL. */
+            token: string;
+        };
+        ApproveDeviceResponse: {
+            message: string;
+            device_id: string;
+        };
+        /** @description Poll state for the device auth flow — the app polls until `authorized` is true. */
+        DeviceAuthorizationStatus: {
+            device_id: string;
+            authorized: boolean;
+            /** @description True while a code/token pair is outstanding for this device. */
+            authorization_pending: boolean;
+        };
         /** @description Per-tier rate/quota limits. `null` means unlimited/not applicable. */
         TierLimits: {
             chat_requests_per_min?: number | null;
@@ -2617,4 +2794,165 @@ export interface components {
     pathItems: never;
 }
 export type $defs = Record<string, never>;
-export type operations = Record<string, never>;
+export interface operations {
+    listDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Devices registered to the current user. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceListItem"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    registerDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterDeviceRequest"];
+            };
+        };
+        responses: {
+            /** @description Device registered (or refreshed). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Device"];
+                };
+            };
+            400: components["responses"]["StandardError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    revokeDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Device identifier to revoke. */
+                device_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Device revoked. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["StandardError"];
+        };
+    };
+    authorizeDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthorizeDeviceRequest"];
+            };
+        };
+        responses: {
+            /** @description Code verified — device authorized. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Auth code + approval link emailed — device authorization pending. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            400: components["responses"]["StandardError"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["StandardError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    approveDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveDeviceRequest"];
+            };
+        };
+        responses: {
+            /** @description Device approved and authorized. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApproveDeviceResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["StandardError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getDeviceAuthorizationStatus: {
+        parameters: {
+            query: {
+                /** @description Device identifier to poll. */
+                device_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current device authorization state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceAuthorizationStatus"];
+                };
+            };
+            400: components["responses"]["StandardError"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["StandardError"];
+        };
+    };
+}

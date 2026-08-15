@@ -3,7 +3,7 @@
 **First-party TypeScript/JavaScript client for the Soulbits REST API.**
 
 Spans two REST hosts:
-- **Cloud API** (`cloud.soulbits.app`) — auth, API keys, account, session, subscription, OpenAPI self-download
+- **Cloud API** (`cloud.soulbits.app`) — auth, API keys, account, session, devices, subscription, OpenAPI self-download
 - **Inference API** (`api.soulbits.app`) — LLM chat, embeddings, rerank, TTS, STT, VAD, speaker embedding, audio/voice conversion
 
 No WebSocket — this is a pure REST client.
@@ -107,11 +107,18 @@ The client exposes sub-APIs, each auto-routed to the correct host:
 | `client.apiKeys` | Cloud | `createAPIKey`, `listAPIKeys`, `revokeAPIKey` |
 | `client.session` | Cloud | `connect`, `disconnect`, `connected`, `versions` |
 | `client.subscription` | Cloud | `listTiers`, `getMySubscription` |
+| `client.devices` | Cloud | `registerDevice`, `listDevices`, `revokeDevice`, `requestDeviceAuthCode`, `verifyDeviceAuthCode`, `approveDevice`, `getDeviceAuthorizationStatus` |
 | `client.models` | Inference | `listModels` (with model_type / input_modalities / output_modalities filters) |
 | `client.inference` | Inference | `chat`, `embeddings`, `rerank`, `tts`, `stt`, `vad`, `speakerEmbed`, `audioConvert`, `voiceConvert`, `imageGen` (deprecated) |
 
 Every method returns `{ data, error, response }` (openapi-fetch style).  
 Every method has an `xxxOrThrow` variant that returns just `data` and throws `APIError` on error.
+
+> **`client.devices` exception:** the devices facade is convenience-style — its
+> methods return camelCase domain objects directly (the snake_case wire format
+> is handled internally) and throw `APIError` on non-2xx responses. Use
+> `err.status` / `err.code` / `err.isAuthError` / `err.isRateLimited` for typed
+> handling.
 
 ## Configuration
 

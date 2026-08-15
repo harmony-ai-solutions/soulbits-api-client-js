@@ -7,12 +7,14 @@ import { createSessionAPI } from './session.js';
 import { createSubscriptionAPI } from './subscription.js';
 import { createModelsAPI } from './models.js';
 import { createInferenceAPI } from './inference.js';
+import { createDevicesAPI } from './devices.js';
 import type { AccountAPI } from './account.js';
 import type { APIKeysAPI } from './apikeys.js';
 import type { SessionAPI } from './session.js';
 import type { SubscriptionAPI } from './subscription.js';
 import type { ModelsAPI } from './models.js';
 import type { InferenceAPI } from './inference.js';
+import type { DevicesAPI } from './devices.js';
 
 /**
  * Soulbits API client.
@@ -22,6 +24,7 @@ import type { InferenceAPI } from './inference.js';
  * - {@link SoulbitsClient.apiKeys}         → Cloud API (create / list / revoke API keys)
  * - {@link SoulbitsClient.session}         → Cloud API (HL session lifecycle)
  * - {@link SoulbitsClient.subscription}    → Cloud API (tiers / current subscription)
+ * - {@link SoulbitsClient.devices}          → Cloud API (register / list / revoke / authorize devices)
  * - {@link SoulbitsClient.models}          → Inference API (public model catalog)
  * - {@link SoulbitsClient.inference}       → Inference API (chat, embeddings, rerank, audio, image)
  */
@@ -30,6 +33,7 @@ export interface SoulbitsClient {
   apiKeys: APIKeysAPI;
   session: SessionAPI;
   subscription: SubscriptionAPI;
+  devices: DevicesAPI;
   models: ModelsAPI;
   inference: InferenceAPI;
 }
@@ -59,6 +63,7 @@ export function createClient(opts: ClientOptions = {}): SoulbitsClient {
     apiKeys: createAPIKeysAPI(cloud),
     session: createSessionAPI(cloud),
     subscription: createSubscriptionAPI(cloud),
+    devices: createDevicesAPI(cloud),
     models: createModelsAPI(inference),
     inference: createInferenceAPI(inference),
   };
