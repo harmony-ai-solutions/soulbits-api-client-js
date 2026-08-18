@@ -1,6 +1,6 @@
 {
   "name": "@harmony-ai-solutions/soulbits-api-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
   "description": "First-party TypeScript/JavaScript client for the Soulbits REST API — auth, inference, models, audio, and more",

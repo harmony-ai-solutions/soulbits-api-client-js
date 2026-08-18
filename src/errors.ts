@@ -69,6 +69,43 @@ export class DeviceAuthRequiredError extends Error {
 }
 
 /**
+ * A data purge is in progress for this user (connect blocked / purge
+ * mid-flight). Terminal for {@link SessionAPI.connectPoll} — the client must
+ * wait `retryAfterMs` and start a fresh connect flow after the purge completes.
+ */
+export class PurgeInProgressError extends Error {
+  /** Milliseconds suggested before retrying the connect, if provided by the API. */
+  readonly retryAfterMs?: number;
+  constructor(retryAfterMs?: number) {
+    super('purge_in_progress');
+    this.name = 'PurgeInProgressError';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/**
+ * Snapshot lease contended while purging — another purge/snapshot holds the
+ * lease. Retry shortly after `retryAfterMs`.
+ */
+export class SnapshotBusyError extends Error {
+  /** Milliseconds suggested before retrying the purge, if provided by the API. */
+  readonly retryAfterMs?: number;
+  constructor(retryAfterMs?: number) {
+    super('snapshot_busy');
+    this.name = 'SnapshotBusyError';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/** DELETE confirmation string missing/wrong — the purge was not started. */
+export class ConfirmationRequiredError extends Error {
+  constructor() {
+    super('confirmation_required');
+    this.name = 'ConfirmationRequiredError';
+  }
+}
+
+/**
  * Unwrap an openapi-fetch result.
  * Returns `data` if present, otherwise throws `APIError`.
  */

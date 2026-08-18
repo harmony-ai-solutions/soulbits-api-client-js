@@ -1,7 +1,15 @@
 import type { FetchClient, components } from './types.js';
-import { APIError, DeviceAuthRequiredError, unwrap } from './errors.js';
+import {
+  APIError,
+  ConfirmationRequiredError,
+  DeviceAuthRequiredError,
+  PurgeInProgressError,
+  SnapshotBusyError,
+  unwrap,
+} from './errors.js';
 
 type SessionConnectResponse = components['schemas']['SessionConnectResponse'];
+type SessionDataDeleteResponse = components['schemas']['SessionDataDeleteResponse'];
 
 /**
  * Options for {@link SessionAPI.connectPoll}.
@@ -83,6 +91,15 @@ export function createSessionAPI(client: FetchClient) {
               throw new DeviceAuthRequiredError();
             }
           }
+          // 409: A data purge is in progress — terminal, not retryable by this
+          // poll. The caller must wait retryAfterMs and start a fresh flow once
+          // the purge completes.
+          if (response.status === 409) {
+            const errBody = error as Record<string, unknown>;
+            if (errBody.error === 'purge_in_progress') {
+              throw new PurgeInProgressError(errBody.retry_after_ms as number | undefined);
+            }
+          }
           // 503: Session provisioning failed — body is SessionConnectResponse
           if (response.status === 503) {
             const errBody = error as Record<string, unknown>;
@@ -161,6 +178,45 @@ export function createSessionAPI(client: FetchClient) {
     /** Convenience: versions and throw on error. */
     async versionsOrThrow() {
       return unwrap(await this.versions());
+    },
+
+    /**
+     * Purge ALL cloud-side engine data for the authenticated user (hard-kills a
+     * live session, deletes every S3 version, the beat schedule, and the DEK).
+     * Requires confirm: "DELETE". Idempotent.
+     *
+     * Returns the raw openapi-fetch result — check `data.status` for
+     * `deleted` / `in_progress`. Use {@link deleteDataOrThrow} to map the
+     * typed error codes.
+     */
+    deleteData(confirm: string = 'DELETE') {
+      return client.POST('/v1/session/data/delete', { body: { confirm: confirm as 'DELETE' } });
+    },
+
+    /**
+     * Convenience: {@link deleteData} with typed error mapping.
+     *
+     * - 400 `confirmation_required` → {@link ConfirmationRequiredError}
+     * - 409 `snapshot_busy` → {@link SnapshotBusyError}(retry_after_ms)
+     * - other errors → {@link APIError} (base behaviour)
+     *
+     * A 200 with `status: 'in_progress'` resolves normally — the caller checks
+     * `data.status` to decide how to proceed.
+     */
+    async deleteDataOrThrow(confirm: string = 'DELETE'): Promise<SessionDataDeleteResponse> {
+      const result = await this.deleteData(confirm);
+      if (result.error) {
+        const body = result.error as Record<string, unknown>;
+        const status = result.response.status;
+        if (status === 400 && body.error === 'confirmation_required') {
+          throw new ConfirmationRequiredError();
+        }
+        if (status === 409 && body.error === 'snapshot_busy') {
+          throw new SnapshotBusyError(body.retry_after_ms as number | undefined);
+        }
+        throw new APIError(status, body);
+      }
+      return result.data as SessionDataDeleteResponse;
     },
   };
 }

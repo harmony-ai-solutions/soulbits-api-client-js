@@ -6,7 +6,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createClient } from '../client.js';
-import { DeviceAuthRequiredError } from '../errors.js';
+import {
+  ConfirmationRequiredError,
+  DeviceAuthRequiredError,
+  PurgeInProgressError,
+  SnapshotBusyError,
+} from '../errors.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -172,6 +177,127 @@ describe('SessionAPI.connectPoll', () => {
       client.session.connectPoll(undefined, { maxRetries: 5 }),
     ).rejects.toThrow('Session provisioning failed: circuit open');
 
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws PurgeInProgressError on 409 purge_in_progress (terminal, single request)', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse(
+      { error: 'purge_in_progress', retry_after_ms: 5000 },
+      409,
+    )));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+
+    const err = await client.session
+      .connectPoll(undefined, { maxRetries: 5 })
+      .then(() => { throw new Error('expected rejection'); }, (e) => e);
+
+    expect(err).toBeInstanceOf(PurgeInProgressError);
+    expect((err as PurgeInProgressError).retryAfterMs).toBe(5000);
+    expect(err.message).toBe('purge_in_progress');
+
+    // Terminal — must NOT keep polling after a 409
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SessionAPI.deleteData', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends confirm=DELETE and passes through the deleted result + counts', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse({
+      status: 'deleted',
+      objects_deleted: 42,
+      versions_deleted: 3,
+      beats_removed: 7,
+      dek_deleted: true,
+    }, 200)));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+    const { data } = await client.session.deleteData();
+
+    const req = extractRequest(0);
+    expect(req.url).toContain('/v1/session/data/delete');
+    expect(req.method).toBe('POST');
+    expect(JSON.parse(await req.text())).toEqual({ confirm: 'DELETE' });
+
+    expect(data).toEqual({
+      status: 'deleted',
+      objects_deleted: 42,
+      versions_deleted: 3,
+      beats_removed: 7,
+      dek_deleted: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults to confirm=DELETE', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse({
+      status: 'deleted',
+      objects_deleted: 0,
+      versions_deleted: 0,
+      beats_removed: 0,
+      dek_deleted: true,
+    }, 200)));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+    await client.session.deleteData();
+
+    const req = extractRequest(0);
+    expect(JSON.parse(await req.text())).toEqual({ confirm: 'DELETE' });
+  });
+
+  it('deleteDataOrThrow resolves normally with status=in_progress on 200', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse({
+      status: 'in_progress',
+      request_id: 'purge-abc-123',
+    }, 200)));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+    const result = await client.session.deleteDataOrThrow();
+
+    expect(result).toEqual({
+      status: 'in_progress',
+      request_id: 'purge-abc-123',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('deleteDataOrThrow throws ConfirmationRequiredError on 400 confirmation_required', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse(
+      { error: 'confirmation_required' },
+      400,
+    )));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+
+    await expect(client.session.deleteDataOrThrow('WRONG')).rejects.toBeInstanceOf(ConfirmationRequiredError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('deleteDataOrThrow throws SnapshotBusyError with retryAfterMs on 409 snapshot_busy', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse(
+      { error: 'snapshot_busy', retry_after_ms: 2000 },
+      409,
+    )));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+
+    const err = await client.session
+      .deleteDataOrThrow()
+      .then(() => { throw new Error('expected rejection'); }, (e) => e);
+
+    expect(err).toBeInstanceOf(SnapshotBusyError);
+    expect((err as SnapshotBusyError).retryAfterMs).toBe(2000);
+    expect(err.message).toBe('snapshot_busy');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

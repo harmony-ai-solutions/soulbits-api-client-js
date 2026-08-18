@@ -1061,6 +1061,19 @@ export interface paths {
                         };
                     };
                 };
+                /** @description A data purge is in progress for this user — connecting is blocked until it completes. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            error?: "purge_in_progress";
+                            retry_after_ms?: number;
+                        };
+                    };
+                };
                 429: components["responses"]["RateLimited"];
                 /** @description Session provisioning failed — see `failure_reason`. */
                 503: {
@@ -1161,6 +1174,26 @@ export interface paths {
                 401: components["responses"]["Unauthorized"];
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/session/data/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge all cloud-side engine data for the authenticated user
+         * @description Hard-kills any live session for the user (force-stop, no graceful snapshot upload), then permanently deletes ALL versions of the user's engine data from the sessions bucket (sync DB + RAG vectors), removes the user's autonomy beat schedule, and deletes the per-user encryption key. Requires typed confirmation. Idempotent — a second call after a completed purge returns zero counts. While a purge is in flight, /v1/session/connect returns 409 purge_in_progress. Protected by the snapshot lease; returns 409 snapshot_busy if the lease is contended.
+         */
+        post: operations["deleteSessionData"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2199,6 +2232,20 @@ export interface components {
             /** @enum {string} */
             status: "connected";
         };
+        SessionDataDeleteResponse: {
+            /** @enum {string} */
+            status: "deleted" | "in_progress";
+            /** @description Present with status=in_progress — the request that owns the running purge. */
+            request_id?: string;
+            /** @description S3 objects (incl. delete markers) removed — present with status=deleted. */
+            objects_deleted?: number;
+            /** @description S3 object versions permanently removed — present with status=deleted. */
+            versions_deleted?: number;
+            /** @description due:lifecycle ZSET members removed — present with status=deleted. */
+            beats_removed?: number;
+            /** @description Whether the per-user encryption key was deleted — present with status=deleted. */
+            dek_deleted?: boolean;
+        };
         VersionsResponse: {
             versions: string[];
             default: string;
@@ -2795,6 +2842,75 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    deleteSessionData: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * @description Typed confirmation guard against accidental calls.
+                     * @enum {string}
+                     */
+                    confirm: "DELETE";
+                };
+            };
+        };
+        responses: {
+            /** @description Purge complete (status=deleted) or already in progress by another request (status=in_progress). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDataDeleteResponse"];
+                };
+            };
+            /** @description Missing or wrong confirmation string. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        error?: "confirmation_required";
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Snapshot lease busy — retry after retry_after_ms. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        error?: "snapshot_busy";
+                        retry_after_ms?: number;
+                    };
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description Task kill could not be confirmed — the resume sweeper will finish the purge. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        error?: "kill_unconfirmed";
+                    };
+                };
+            };
+        };
+    };
     listDevices: {
         parameters: {
             query?: never;
