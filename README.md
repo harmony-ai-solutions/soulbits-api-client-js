@@ -105,7 +105,7 @@ The client exposes sub-APIs, each auto-routed to the correct host:
 |---|---|---|
 | `client.account` | Cloud | `login`, `register`, `refresh`, `verify`, `resendVerification`, `passwordResetRequest`, `passwordResetConfirm`, `googleSignIn`, `googleWebSignIn`, `appleSignIn`, `appleWebSignIn`, `logout`, `me`, `updateProfile`, `changePassword`, `linkGoogle`, `unlinkGoogle`, `linkApple`, `unlinkApple` |
 | `client.apiKeys` | Cloud | `createAPIKey`, `listAPIKeys`, `revokeAPIKey` |
-| `client.session` | Cloud | `connect`, `disconnect`, `connected`, `versions` |
+| `client.session` | Cloud | `connect`, `connectPoll`, `disconnect`, `connected`, `versions`, `deleteData`, `deleteDataOrThrow` (v0.2.0) |
 | `client.subscription` | Cloud | `listTiers`, `getMySubscription` |
 | `client.devices` | Cloud | `registerDevice`, `listDevices`, `revokeDevice`, `requestDeviceAuthCode`, `verifyDeviceAuthCode`, `approveDevice`, `getDeviceAuthorizationStatus` |
 | `client.models` | Inference | `listModels` (with model_type / input_modalities / output_modalities filters) |
@@ -119,6 +119,51 @@ Every method has an `xxxOrThrow` variant that returns just `data` and throws `AP
 > is handled internally) and throw `APIError` on non-2xx responses. Use
 > `err.status` / `err.code` / `err.isAuthError` / `err.isRateLimited` for typed
 > handling.
+
+## Cloud data purge (Reset Cloud Data)
+
+Added in **v0.2.0**. `session.deleteData` permanently deletes the authenticated
+user's cloud-side engine data (hard-kills a live session, deletes every S3
+version, the beat schedule, and the DEK). It is idempotent and destructive — it
+requires `confirm: "DELETE"`.
+
+```ts
+import {
+  createClient,
+  ConfirmationRequiredError,
+  SnapshotBusyError,
+  PurgeInProgressError,
+} from '@harmony-ai-solutions/soulbits-api-client';
+
+const client = createClient({ paseto, refreshToken });
+
+// Raw result style — check `data.status`
+const { data } = await client.session.deleteData('DELETE');
+if (data?.status === 'deleted') {
+  console.log('purged', data.objects_deleted, 'objects');
+}
+
+// Throwing convenience style with typed errors
+try {
+  const res = await client.session.deleteDataOrThrow('DELETE');
+  if (res.status === 'in_progress') {
+    // a purge is already running for this user
+  }
+} catch (err) {
+  if (err instanceof ConfirmationRequiredError) {
+    // 400 — confirm must be "DELETE"
+  } else if (err instanceof SnapshotBusyError) {
+    // 409 — snapshot lease busy; retry after err.retryAfterMs
+  } else if (err instanceof PurgeInProgressError) {
+    // 409 — already running; wait err.retryAfterMs (also thrown by connect)
+  }
+}
+```
+
+While a purge is in flight, `connectPoll` treats the server's `409
+purge_in_progress` as **terminal** — it throws a `PurgeInProgressError` instead
+of retrying, because connecting is blocked until the purge completes. The caller
+waits `retryAfterMs` and starts a fresh connect flow once the purge finishes.
 
 ## Configuration
 
