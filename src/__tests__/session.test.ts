@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createClient } from '../client.js';
 import {
+  APIError,
   ConfirmationRequiredError,
   DeviceAuthRequiredError,
   PurgeInProgressError,
@@ -207,15 +208,12 @@ describe('SessionAPI.deleteData', () => {
     vi.restoreAllMocks();
   });
 
-  it('sends confirm=DELETE and passes through the deleted result + counts', async () => {
+  it('sends confirm=DELETE and passes through the in_progress result on 202', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch');
     fetchMock.mockReturnValue(Promise.resolve(mockResponse({
-      status: 'deleted',
-      objects_deleted: 42,
-      versions_deleted: 3,
-      beats_removed: 7,
-      dek_deleted: true,
-    }, 200)));
+      status: 'in_progress',
+      request_id: 'purge-abc-123',
+    }, 202)));
 
     const client = createClient({ apiKey: 'sb_cloud_fakekey' });
     const { data } = await client.session.deleteData();
@@ -226,11 +224,25 @@ describe('SessionAPI.deleteData', () => {
     expect(JSON.parse(await req.text())).toEqual({ confirm: 'DELETE' });
 
     expect(data).toEqual({
-      status: 'deleted',
-      objects_deleted: 42,
-      versions_deleted: 3,
-      beats_removed: 7,
-      dek_deleted: true,
+      status: 'in_progress',
+      request_id: 'purge-abc-123',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes through in_progress on 200 (already running by another request)', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse({
+      status: 'in_progress',
+      request_id: 'purge-already',
+    }, 200)));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+    const { data } = await client.session.deleteData();
+
+    expect(data).toEqual({
+      status: 'in_progress',
+      request_id: 'purge-already',
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -238,12 +250,9 @@ describe('SessionAPI.deleteData', () => {
   it('defaults to confirm=DELETE', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch');
     fetchMock.mockReturnValue(Promise.resolve(mockResponse({
-      status: 'deleted',
-      objects_deleted: 0,
-      versions_deleted: 0,
-      beats_removed: 0,
-      dek_deleted: true,
-    }, 200)));
+      status: 'in_progress',
+      request_id: 'purge-abc-123',
+    }, 202)));
 
     const client = createClient({ apiKey: 'sb_cloud_fakekey' });
     await client.session.deleteData();
@@ -265,6 +274,23 @@ describe('SessionAPI.deleteData', () => {
     expect(result).toEqual({
       status: 'in_progress',
       request_id: 'purge-abc-123',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('deleteDataOrThrow resolves normally with status=in_progress on 202', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse({
+      status: 'in_progress',
+      request_id: 'purge-new-202',
+    }, 202)));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+    const result = await client.session.deleteDataOrThrow();
+
+    expect(result).toEqual({
+      status: 'in_progress',
+      request_id: 'purge-new-202',
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -298,6 +324,129 @@ describe('SessionAPI.deleteData', () => {
     expect(err).toBeInstanceOf(SnapshotBusyError);
     expect((err as SnapshotBusyError).retryAfterMs).toBe(2000);
     expect(err.message).toBe('snapshot_busy');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SessionAPI.deleteStatus', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns the in_progress shape with phase and attempts', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse({
+      status: 'in_progress',
+      phase: 's3',
+      request_id: 'purge-abc-123',
+      attempts: 2,
+    })));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+    const { data } = await client.session.deleteStatus();
+
+    const req = extractRequest(0);
+    expect(req.url).toContain('/v1/session/data/delete/status');
+    expect(req.method).toBe('GET');
+
+    expect(data).toEqual({
+      status: 'in_progress',
+      phase: 's3',
+      request_id: 'purge-abc-123',
+      attempts: 2,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('deleteStatusOrThrow returns the deleted shape with counters', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse({
+      status: 'deleted',
+      request_id: 'purge-abc-123',
+      attempts: 0,
+      objects_deleted: 4,
+      versions_deleted: 5,
+      beats_removed: 2,
+      dek_deleted: true,
+      finished_at: 1790964494,
+    })));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+    const result = await client.session.deleteStatusOrThrow();
+
+    expect(result).toEqual({
+      status: 'deleted',
+      request_id: 'purge-abc-123',
+      attempts: 0,
+      objects_deleted: 4,
+      versions_deleted: 5,
+      beats_removed: 2,
+      dek_deleted: true,
+      finished_at: 1790964494,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('deleteStatusOrThrow returns the failed shape with error', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse({
+      status: 'failed',
+      request_id: 'purge-abc-123',
+      attempts: 5,
+      error: 'attempt cap reached',
+      objects_deleted: 0,
+      versions_deleted: 0,
+      beats_removed: 0,
+      dek_deleted: false,
+      finished_at: 1790964494,
+    })));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+    const result = await client.session.deleteStatusOrThrow();
+
+    expect(result).toEqual({
+      status: 'failed',
+      request_id: 'purge-abc-123',
+      attempts: 5,
+      error: 'attempt cap reached',
+      objects_deleted: 0,
+      versions_deleted: 0,
+      beats_removed: 0,
+      dek_deleted: false,
+      finished_at: 1790964494,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('deleteStatusOrThrow returns the none shape', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse({
+      status: 'none',
+    })));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+    const result = await client.session.deleteStatusOrThrow();
+
+    expect(result).toEqual({ status: 'none' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('deleteStatusOrThrow throws APIError on 401 so callers can refresh + retry', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock.mockReturnValue(Promise.resolve(mockResponse(
+      { error: 'unauthorized', message: 'token expired' },
+      401,
+    )));
+
+    const client = createClient({ apiKey: 'sb_cloud_fakekey' });
+
+    const err = await client.session
+      .deleteStatusOrThrow()
+      .then(() => { throw new Error('expected rejection'); }, (e) => e);
+
+    expect(err).toBeInstanceOf(APIError);
+    expect((err as APIError).status).toBe(401);
+    expect((err as APIError).isAuthError).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

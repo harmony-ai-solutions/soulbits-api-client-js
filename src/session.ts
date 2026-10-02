@@ -10,6 +10,15 @@ import {
 
 type SessionConnectResponse = components['schemas']['SessionConnectResponse'];
 type SessionDataDeleteResponse = components['schemas']['SessionDataDeleteResponse'];
+type SessionDataDeleteStatusResponse = components['schemas']['SessionDataDeleteStatusResponse'];
+
+/**
+ * Coarse phase of an in-flight data purge, as reported by
+ * {@link SessionAPI.deleteStatus}. The generated schema types `phase` as a
+ * plain string; this union lets consumers switch exhaustively over the known
+ * phases without string casting.
+ */
+export type DataPurgePhase = 'start' | 'kill' | 'routing' | 's3' | 'beats' | 'dek' | 'done';
 
 /**
  * Options for {@link SessionAPI.connectPoll}.
@@ -181,13 +190,16 @@ export function createSessionAPI(client: FetchClient) {
     },
 
     /**
-     * Purge ALL cloud-side engine data for the authenticated user (hard-kills a
-     * live session, deletes every S3 version, the beat schedule, and the DEK).
-     * Requires confirm: "DELETE". Idempotent.
+     * Start an async purge of ALL cloud-side engine data for the
+     * authenticated user (hard-kills a live session, deletes every S3
+     * version, the beat schedule, and the DEK). Requires confirm: "DELETE".
+     * Idempotent.
      *
-     * Returns the raw openapi-fetch result — check `data.status` for
-     * `deleted` / `in_progress`. Use {@link deleteDataOrThrow} to map the
-     * typed error codes.
+     * The purge runs in the background. This POST only ever resolves with
+     * `status: "in_progress"` plus a `request_id` (202 = newly accepted,
+     * 200 = already running) — it NEVER returns "deleted". Follow progress
+     * with {@link deleteStatus} / {@link deleteStatusOrThrow} until a
+     * terminal `deleted` or `failed` outcome.
      */
     deleteData(confirm: string = 'DELETE') {
       return client.POST('/v1/session/data/delete', { body: { confirm: confirm as 'DELETE' } });
@@ -198,10 +210,11 @@ export function createSessionAPI(client: FetchClient) {
      *
      * - 400 `confirmation_required` → {@link ConfirmationRequiredError}
      * - 409 `snapshot_busy` → {@link SnapshotBusyError}(retry_after_ms)
-     * - other errors → {@link APIError} (base behaviour)
+     * - 401 / 503 / other errors → {@link APIError}
      *
-     * A 200 with `status: 'in_progress'` resolves normally — the caller checks
-     * `data.status` to decide how to proceed.
+     * Resolves with the initiation shape `{ status: "in_progress",
+     * request_id }` (202 or 200). The terminal outcome ("deleted" | "failed")
+     * comes from {@link deleteStatus} — poll it after initiating.
      */
     async deleteDataOrThrow(confirm: string = 'DELETE'): Promise<SessionDataDeleteResponse> {
       const result = await this.deleteData(confirm);
@@ -217,6 +230,39 @@ export function createSessionAPI(client: FetchClient) {
         throw new APIError(status, body);
       }
       return result.data as SessionDataDeleteResponse;
+    },
+
+    /**
+     * Poll the status of the authenticated user's data purge. Always returns
+     * 200 when authed, with one of four shapes:
+     *
+     * - `in_progress` — purge active/stalled, with `phase` and `attempts`
+     * - `deleted` — terminal success, with the S3/beat/DEK counters
+     * - `failed` — terminal failure; the user is unblocked, retry the delete
+     * - `none` — nothing running or remembered (tombstone may have expired)
+     *
+     * Returns the raw openapi-fetch result — check `data.status` for the
+     * terminal outcome. Use {@link deleteStatusOrThrow} to throw on error.
+     */
+    deleteStatus() {
+      return client.GET('/v1/session/data/delete/status');
+    },
+
+    /**
+     * Convenience: {@link deleteStatus} with throw semantics.
+     *
+     * Throws {@link APIError} on any error response — including 401, so the
+     * caller can refresh the token and retry — and resolves with the typed
+     * {@link SessionDataDeleteStatusResponse} union otherwise. The status
+     * discriminates: `in_progress` (with `phase`/`attempts`), `deleted`
+     * (with counters), `failed` (with `error` + zero counters), or `none`.
+     */
+    async deleteStatusOrThrow(): Promise<SessionDataDeleteStatusResponse> {
+      const result = await this.deleteStatus();
+      if (result.error) {
+        throw new APIError(result.response.status, result.error as Record<string, unknown>);
+      }
+      return result.data as SessionDataDeleteStatusResponse;
     },
   };
 }

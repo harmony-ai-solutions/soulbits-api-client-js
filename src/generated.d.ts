@@ -1190,10 +1190,30 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Purge all cloud-side engine data for the authenticated user
-         * @description Hard-kills any live session for the user (force-stop, no graceful snapshot upload), then permanently deletes ALL versions of the user's engine data from the sessions bucket (sync DB + RAG vectors), removes the user's autonomy beat schedule, and deletes the per-user encryption key. Requires typed confirmation. Idempotent — a second call after a completed purge returns zero counts. While a purge is in flight, /v1/session/connect returns 409 purge_in_progress. Protected by the snapshot lease; returns 409 snapshot_busy if the lease is contended.
+         * Purge all cloud-side engine data for the authenticated user (async)
+         * @description Starts an asynchronous purge: hard-kills any live session for the user (force-stop, no graceful snapshot upload), then permanently deletes ALL versions of the user's engine data from the sessions bucket (sync DB + RAG vectors), removes the user's autonomy beat schedule, and deletes the per-user encryption key — all in the background. Requires typed confirmation. Returns 202 Accepted immediately with a request_id; poll GET /v1/session/data/delete/status for the terminal outcome ("deleted" with counters, or "failed"). Idempotent — a second call after a completed purge restarts an empty (zero-count) purge. While a purge is in flight, /v1/session/connect returns 409 purge_in_progress. The purge holds the snapshot lease before it starts; a contended lease returns 409 snapshot_busy (the client auto-retries).
          */
         post: operations["deleteSessionData"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/session/data/delete/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Poll the status of the authenticated user's data purge
+         * @description Reports the current purge state. 200 always (after auth) with one of four shapes: in_progress (flag set — purge active or stalled, with phase/request_id/attempts), deleted (terminal success, with the S3 / beat / DEK counters from the result tombstone), failed (terminal failure — the sweeper gave up; the user is unblocked but the data was not guaranteed deleted; retry the delete), or none (nothing running or remembered). Flag presence wins over the terminal tombstone: while a failed run is still flagged for the sweeper the report stays in_progress.
+         */
+        get: operations["getSessionDataDeleteStatus"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2232,19 +2252,52 @@ export interface components {
             /** @enum {string} */
             status: "connected";
         };
+        /** @description Async purge initiation. The purge runs in the background; poll `GET /v1/session/data/delete/status` for the terminal outcome ("deleted" or "failed"). */
         SessionDataDeleteResponse: {
             /** @enum {string} */
-            status: "deleted" | "in_progress";
-            /** @description Present with status=in_progress — the request that owns the running purge. */
+            status: "in_progress";
+            /** @description Poll identifier — echoed by the status endpoint while the run is in flight. */
             request_id?: string;
-            /** @description S3 objects (incl. delete markers) removed — present with status=deleted. */
-            objects_deleted?: number;
-            /** @description S3 object versions permanently removed — present with status=deleted. */
-            versions_deleted?: number;
-            /** @description due:lifecycle ZSET members removed — present with status=deleted. */
-            beats_removed?: number;
-            /** @description Whether the per-user encryption key was deleted — present with status=deleted. */
-            dek_deleted?: boolean;
+        };
+        SessionDataDeleteStatusResponse: {
+            /** @enum {string} */
+            status: "in_progress";
+            /** @description Coarse purge phase (kill, routing, s3, beats, dek, done). */
+            phase: string;
+            request_id: string;
+            /** @description Sweeper resume attempts so far. */
+            attempts: number;
+        } | {
+            /** @enum {string} */
+            status: "deleted";
+            request_id: string;
+            attempts: number;
+            /** @description S3 objects (incl. delete markers) removed. */
+            objects_deleted: number;
+            /** @description S3 object versions permanently removed. */
+            versions_deleted: number;
+            /** @description due:lifecycle ZSET members removed. */
+            beats_removed: number;
+            /** @description Whether the per-user encryption key was deleted. */
+            dek_deleted: boolean;
+            /** @description Unix seconds when the purge finished. */
+            finished_at: number;
+        } | {
+            /** @enum {string} */
+            status: "failed";
+            request_id: string;
+            attempts: number;
+            /** @description Failure reason (e.g. "attempt cap reached"). */
+            error: string;
+            objects_deleted: number;
+            versions_deleted: number;
+            beats_removed: number;
+            dek_deleted: boolean;
+            /** @description Unix seconds when the purge gave up. */
+            finished_at: number;
+        } | {
+            /** @enum {string} */
+            status: "none";
         };
         VersionsResponse: {
             versions: string[];
@@ -2861,8 +2914,17 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Purge complete (status=deleted) or already in progress by another request (status=in_progress). */
+            /** @description Already in progress by another request — the same in_progress shape as 202. */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDataDeleteResponse"];
+                };
+            };
+            /** @description Purge accepted and running in the background. Poll GET /v1/session/data/delete/status with the request_id. */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2897,7 +2959,29 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description Task kill could not be confirmed — the resume sweeper will finish the purge. */
+        };
+    };
+    getSessionDataDeleteStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Purge state (in_progress | deleted | failed | none). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDataDeleteStatusResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimited"];
+            /** @description Purge state temporarily unavailable (Valkey down) — retry. */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -2905,7 +2989,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        error?: "kill_unconfirmed";
+                        error_code?: "service_unavailable";
+                        message?: string;
                     };
                 };
             };

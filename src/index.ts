@@ -42,7 +42,7 @@ export {
 // ── Sub-API types ──────────────────────────────────────────────────────────
 export type { AccountAPI } from './account.js';
 export type { APIKeysAPI } from './apikeys.js';
-export type { SessionAPI } from './session.js';
+export type { SessionAPI, DataPurgePhase } from './session.js';
 export type { SubscriptionAPI } from './subscription.js';
 export type { DevicesAPI } from './devices.js';
 export type {
