@@ -161,6 +161,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/device/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem a delegated-enrollment grant for a device session
+         * @description Exchanges a single-use delegated-enrollment grant for the enrolled device's OWN device-scoped session (PASETO + refresh token) — the same token shape every other sign-in path returns. NO account authentication is required: the grant is the credential. The device is registered as authorized because the minting device vouched for it. Enrolled devices are full devices and may themselves mint grants.
+         */
+        post: operations["enrollDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/verify": {
         parameters: {
             query?: never;
@@ -650,6 +670,7 @@ export interface paths {
                     };
                 };
                 401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
             };
         };
         put?: never;
@@ -659,7 +680,7 @@ export interface paths {
         head?: never;
         /**
          * Update the current user profile
-         * @description Partial update — only `display_name` is mutable currently.
+         * @description Partial update — `display_name` and `avatar_url` are mutable.
          */
         patch: {
             parameters: {
@@ -672,6 +693,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         display_name: string;
+                        /** @description Profile picture as a data URL (`data:image/...;base64,...`) or external URL. To remove the picture, send an empty string. */
+                        avatar_url?: string;
                     };
                 };
             };
@@ -690,6 +713,570 @@ export interface paths {
         };
         trace?: never;
     };
+    "/v1/auth/email/change/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start an email change
+         * @description Stage 1–2. Step-up with the account password, then stage a move to
+         *     `new_email`.
+         *
+         *     The change is confirmed from BOTH mailboxes: a token is mailed to the
+         *     TARGET address first (stage 3), and only after that is a blocking
+         *     approval token mailed to the CURRENT address naming the target
+         *     (stage 4). Neither address can complete the change alone.
+         *
+         *     Requires a password on the account. Google/Apple-created accounts have
+         *     none and receive `403 password_required` — they must set a password
+         *     first (`PUT /v1/auth/password`), after which the normal flow applies.
+         *     This prevents the email change from silently minting a second credential
+         *     on an account whose only credential is the provider link.
+         *
+         *     New requests invalidate any still-pending one. A 60s per-user cooldown
+         *     applies (`429`, with `retry_after`).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Format: password
+                         * @description Current account password (step-up challenge).
+                         */
+                        current_password: string;
+                        /** Format: email */
+                        new_email: string;
+                    };
+                };
+            };
+            responses: {
+                /**
+                 * @description Change staged AND the confirmation email was accepted for delivery
+                 *     to the new address. A `202` is a promise that mail is on its way — if
+                 *     the hand-off fails this endpoint returns `500` instead, so clients
+                 *     should only tell the user to check their inbox on success.
+                 */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"];
+                    };
+                };
+                /** @description Missing/invalid fields. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Not authenticated, or the current password is incorrect. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description API keys cannot change the email, or the account has no password (`password_required`). */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The address is already in use (`email_in_use`) or is already the account's address (`same_email`). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Per-user cooldown still active. */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /**
+                 * @description The change was staged but the confirmation email could not be sent.
+                 *     The request remains resumable (the new address can be confirmed, or
+                 *     the mail re-sent) — the staged token is not consumed here.
+                 */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/email/change/confirm-new": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm the new email address (stage 3)
+         * @description Redeems the single-use token mailed to the TARGET address. On success a
+         *     blocking approval email is sent to the CURRENT address naming the target.
+         *
+         *     Must be called by the authenticated owner of the request — the emailed
+         *     token is not sufficient on its own.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        token: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description New address confirmed; approval email sent to the current address. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"];
+                    };
+                };
+                403: components["responses"]["StandardError"];
+                404: components["responses"]["StandardError"];
+                410: components["responses"]["StandardError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/email/change/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve and commit the email change (stage 5)
+         * @description Redeems the single-use token mailed to the CURRENT address and commits
+         *     the change. The previous address is retained for audit, and a Valkey
+         *     cutoff signs out every session (the account owner must sign in again).
+         *
+         *     Must be called by the authenticated owner of the request.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        token: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Email changed; all sessions signed out. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"];
+                    };
+                };
+                403: components["responses"]["StandardError"];
+                404: components["responses"]["StandardError"];
+                /** @description The new address has not been confirmed yet, or it was taken in the meantime (`email_in_use`). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                410: components["responses"]["StandardError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/email/change/resend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-send the current step's confirmation email
+         * @description Recovery path for "the confirmation email never arrived" (spam, a typo'd
+         *     forward, or a failed hand-off).
+         *
+         *     Re-mints the token for whichever stage the change is CURRENTLY on and
+         *     re-sends only that one email. It never advances the flow: the approval
+         *     (stage 4) branch is unreachable until the new address has confirmed, so
+         *     this cannot be used to skip stage 3. The previously issued link for that
+         *     stage stops working, as the newest token replaces it.
+         *
+         *     Rate-limited to one resend per 60 s (`429` with `retry_after`), matching
+         *     the per-user cooldown on starting a change.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Confirmation email re-sent for the current stage. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
+                /** @description No pending change (`no_pending_change`). */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Resend cooldown still active. */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/email/change/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a pending email change
+         * @description Abandons a pending change so a different address can be used immediately
+         *     — the "I typed the wrong address" / "I changed my mind" case — instead of
+         *     the request blocking a new attempt until it expires.
+         *
+         *     Voids BOTH tokens (including any link already delivered), because it sets
+         *     the same single-use tombstone every confirmation lookup guards on.
+         *     Idempotent: cancelling when nothing is pending returns 200.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Cancelled (or nothing was pending). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/email/change/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Current email-change state
+         * @description Reports whether a pending change exists and which step it awaits, so the portal can resume after a reload.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Pending-change state. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EmailChangeStatus"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List active sessions
+         * @description Every signed-in session for the account — one per device or browser —
+         *     most recently active first, with the calling session marked `current`.
+         *
+         *     Signing out one session (`DELETE /v1/auth/sessions/{session_id}`) kills
+         *     that session's tokens immediately, not just its refresh token.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Active sessions. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SessionListResponse"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Sign out everywhere
+         * @description Ends EVERY session for the account, including the calling one. The
+         *     caller must sign in again afterwards; this is the deliberate "sign out
+         *     everywhere" action (the same invalidation the email-change flow applies
+         *     on commit).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description All sessions ended. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RevokeAllSessionsResponse"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Sign out one session
+         * @description Ends a single session — one device or browser. Refused for the calling
+         *     session (`400 cannot_revoke_current_session`), which must be ended with
+         *     `POST /v1/auth/logout` so the client knows it has been signed out.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Session identifier from `GET /v1/auth/sessions`. */
+                    session_id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Session ended. */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["StandardError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
+                404: components["responses"]["StandardError"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List linked sign-in providers
+         * @description Returns the OAuth providers (Google, Apple) attached to the account so
+         *     the portal can offer a disconnect action. Disconnecting uses
+         *     `DELETE /v1/auth/link/{google,apple}`, which refuses while the account
+         *     has no password (lockout guard).
+         *
+         *     The synthetic `email` identity from registration is not listed.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Linked providers (possibly empty). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LinkedIdentity"][];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/password": {
         parameters: {
             query?: never;
@@ -700,7 +1287,14 @@ export interface paths {
         get?: never;
         /**
          * Change password
-         * @description Verifies the old password, sets the new one, and writes a Valkey cutoff (forces re-login everywhere).
+         * @description Changes the authenticated user's password and writes a Valkey cutoff
+         *     (forces re-login everywhere). `old_password` is required and verified.
+         *
+         *     Accounts created via Google/Apple Sign-In have NO password, so they
+         *     cannot use this endpoint — setting a FIRST password creates a credential
+         *     and is gated behind an email-confirmed, session-bound flow
+         *     (`POST /v1/auth/password/setup/request` → `.../confirm`). A password-less
+         *     account receives `409 password_setup_required`.
          */
         put: {
             parameters: {
@@ -712,7 +1306,10 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": {
-                        /** Format: password */
+                        /**
+                         * Format: password
+                         * @description Current password. Required and verified.
+                         */
                         old_password: string;
                         /** Format: password */
                         new_password: string;
@@ -729,11 +1326,858 @@ export interface paths {
                         "application/json": components["schemas"]["Message"];
                     };
                 };
+                /** @description Invalid request — missing/new-password validation failure, or `old_password` omitted. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
                 401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
+                /** @description The account has no password yet (`password_setup_required`) — use the first-password setup flow. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password/setup/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request first-password setup (OAuth-only accounts)
+         * @description Stages a single-use token and mails it to the account's OWN address. The
+         *     password is only set when the token is redeemed via
+         *     `POST /v1/auth/password/setup/confirm` by an authenticated caller, so a
+         *     stolen session token alone can never create a credential.
+         *
+         *     Refused with `409 password_already_set` when the account already has a
+         *     password (use `PUT /v1/auth/password` instead). Refused with `403` for
+         *     API-key callers.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Setup email sent. */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
+                /** @description The account already has a password (`password_already_set`). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password/setup/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm first-password setup
+         * @description Redeems the token mailed by `POST /v1/auth/password/setup/request` and
+         *     sets the first password. The caller must be authenticated as the request
+         *     owner (the token is session-bound), so a forwarded or leaked mail alone
+         *     is not sufficient. Writes a Valkey cutoff (forces re-login everywhere).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        token: string;
+                        /** Format: password */
+                        new_password: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Password set. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"];
+                    };
+                };
+                400: components["responses"]["StandardError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["StandardError"];
+                404: components["responses"]["StandardError"];
+                /** @description The account already has a password (`password_already_set`). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Token expired. */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Request permanent deletion of the current user's account (email-confirmed)
+         * @description STAGES a permanent account deletion — it does NOT delete anything yet.
+         *     Because deletion is irreversible, it is gated behind proof of control of
+         *     the account's OWN mailbox: this call validates the typed confirmation
+         *     (`"confirm":"DELETE"`) plus a step-up credential and mails a single-use
+         *     confirmation link to the account address. The deletion commits only when
+         *     that link is redeemed via `POST /v1/auth/account/confirm` by an
+         *     authenticated caller, so a stolen session alone cannot destroy the
+         *     account.
+         *
+         *     Step-up (verified when supplied): `current_password` for passworded
+         *     accounts, or `confirm_email` (the user re-typing the account address) for
+         *     passwordless Google/Apple accounts. The emailed link is the mandatory
+         *     hard confirmation for every account.
+         *
+         *     On commit, the user's CLOUD data is purged first (live sessions killed,
+         *     every S3 version under `{userID}/` deleted, the per-user DEK deleted),
+         *     then the user row is hard-deleted (DB `ON DELETE CASCADE` removes API
+         *     keys, refresh tokens, devices, themes, subscriptions, sessions,
+         *     identities and email/password-reset tokens).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description Must be exactly `"DELETE"`. */
+                        confirm: string;
+                        /** @description Step-up password (passworded accounts). */
+                        current_password?: string;
+                        /** @description Re-typed account email (passwordless Google/Apple accounts). */
+                        confirm_email?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Deletion staged; a confirmation link was emailed to the account address. */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"];
+                    };
+                };
+                /** @description Confirmation missing/incorrect, or `confirm_email` did not match. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot delete the account. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The confirmation email could not be sent. */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/account/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm and commit a staged account deletion
+         * @description Redeems the single-use token mailed to the account address and permanently
+         *     deletes the account. The token is bound to the authenticated caller, so a
+         *     forwarded or leaked email alone cannot delete the account. The deletion
+         *     itself is a single synchronous database transaction (every account-scoped
+         *     row is removed via FK cascade); the deleted user's hosted-backup blobs in
+         *     s3-sync-backup are purged asynchronously afterwards. Irreversible.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description The single-use token from the confirmation email. */
+                        token: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Account deleted. The database deletion is committed and final; residual best-effort cleanup (the async S3 purge of the user's hosted-backup blobs) may still be in flight — do not wait or retry for it. */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Message"];
+                    };
+                };
+                /** @description Token missing. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot delete the account, or the link belongs to a different account. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Invalid or already-used confirmation link. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The confirmation link has expired. */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/backup-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the account's escrowed wrapped backup key (W1)
+         * @description Returns the account's escrowed wrapped-key blob for restore (2-6). 404
+         *     when no key is escrowed. PASETO (interactive) only.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The escrowed wrapped-key blob. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BackupKeyResponse"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot access the backup-key escrow. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No backup key is escrowed for this account. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Escrow unavailable (no KMS configured). */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Escrow (or replace) the account's wrapped backup key (W1)
+         * @description Stores a single opaque, client-wrapped backup-key blob for the account
+         *     (2-6's W1 account escrow). The backend never generates, derives or
+         *     inspects key material: it escrows the blob under a KMS-managed KEK
+         *     (envelope). Scope is deliberately narrow — blob only, ≤1 KiB decoded —
+         *     so this can never become a bulk-storage endpoint. PASETO (interactive)
+         *     only; API keys are refused. Re-escrowing replaces the previous blob.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BackupKeyPutRequest"];
+                };
+            };
+            responses: {
+                /** @description Escrowed. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BackupKeyStatus"];
+                    };
+                };
+                /** @description Missing or non-base64 `wrapped_key`. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot access the backup-key escrow. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The decoded wrapped-key blob exceeds the 1 KiB limit. */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Escrow unavailable (no KMS configured). */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Drop the account's escrowed backup key (W1)
+         * @description Removes the account's escrowed wrapped-key blob. Idempotent. Used by
+         *     the account-deletion rework (6-2) and by a user-initiated "reset backup
+         *     key". PASETO (interactive) only.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted (or already absent). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BackupKeyStatus"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot access the backup-key escrow. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Escrow unavailable (no KMS configured). */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/sync-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the account's escrowed wrapped sync-group key (7-4)
+         * @description Returns the account's escrowed wrapped sync-group-key blob so a joining
+         *     device can unwrap it (7-2/7-3). 404 when no key is escrowed. PASETO
+         *     (interactive) only.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The escrowed wrapped sync-group-key blob. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncKeyResponse"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot access the sync key escrow. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No sync key is escrowed for this account. */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Escrow unavailable (no KMS configured). */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Escrow (or replace) the account's wrapped sync-group key (7-4)
+         * @description Stores a single opaque, client-wrapped sync-group-key blob for the
+         *     account (the second escrow slot beside the backup key, 7-2's sync-group
+         *     key). The backend never generates, derives or inspects key material: it
+         *     escrows the blob under a KMS-managed KEK (envelope). Scope is
+         *     deliberately narrow — blob only, ≤1 KiB decoded. PASETO (interactive)
+         *     only; API keys are refused. Re-escrowing replaces the previous blob.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SyncKeyPutRequest"];
+                };
+            };
+            responses: {
+                /** @description Escrowed. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncKeyStatus"];
+                    };
+                };
+                /** @description Missing or non-base64 `wrapped_key`. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot access the sync key escrow. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The decoded wrapped-key blob exceeds the 1 KiB limit. */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Escrow unavailable (no KMS configured). */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Drop the account's escrowed sync-group key (7-4)
+         * @description Removes the account's escrowed wrapped sync-group-key blob. Idempotent.
+         *     Used when all devices are revoked and the group restarts fresh. PASETO
+         *     (interactive) only.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted (or already absent). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncKeyStatus"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot access the sync key escrow. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Escrow unavailable (no KMS configured). */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/sync-rotation-required": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the account's sync rotation-required flag (7-4)
+         * @description Whether a sync-key rotation is pending. Defaults to `false`. The app
+         *     polls this and, when true, drives the engine's engine-authoritative
+         *     rotate and re-escrows the new wrapped key. PASETO (interactive) only.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The rotation-required flag. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncRotationStatus"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot access the sync rotation flag. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Rotation flag unavailable. */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Set the account's sync rotation-required flag (7-4)
+         * @description The portal sets `{"required": true}` ("Reset sync key") to flag a pending
+         *     rotation; `{"required": false}` clears it. The portal never sees key
+         *     material. PASETO (interactive) only.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SyncRotationPutRequest"];
+                };
+            };
+            responses: {
+                /** @description Flag updated. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncRotationStatus"];
+                    };
+                };
+                /** @description Missing `required`. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot access the sync rotation flag. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Rotation flag unavailable. */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Clear the account's sync rotation-required flag (7-4)
+         * @description Clears the flag after the app has rotated the engine key and re-escrowed
+         *     it. Idempotent. PASETO (interactive) only.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Flag cleared. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncRotationStatus"];
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                /** @description API keys cannot access the sync rotation flag. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Rotation flag unavailable. */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -782,7 +2226,9 @@ export interface paths {
         };
         /**
          * Unlink the Google identity
-         * @description Lockout guard — refuses if no password is set.
+         * @description Lockout guard — refuses with `403 password_required` if the account has
+         *     no password, because the provider link would then be its only credential.
+         *     Set a password first (`PUT /v1/auth/password`).
          */
         delete: {
             parameters: {
@@ -851,7 +2297,9 @@ export interface paths {
         };
         /**
          * Unlink the Apple identity
-         * @description Lockout guard — refuses if no password is set.
+         * @description Lockout guard — refuses with `403 password_required` if the account has
+         *     no password, because the provider link would then be its only credential.
+         *     Set a password first (`PUT /v1/auth/password`).
          */
         delete: {
             parameters: {
@@ -912,8 +2360,8 @@ export interface paths {
         put?: never;
         /**
          * Create an API key
-         * @description Returns the full key ONCE. Max 5 active (non-revoked) keys per user.
-         *     API keys CANNOT create/list/revoke other API keys.
+         * @description Returns the full key ONCE. Max 5 keys per user.
+         *     API keys CANNOT create/list/delete other API keys.
          */
         post: {
             parameters: {
@@ -969,8 +2417,12 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Revoke an API key
-         * @description Idempotent (already-revoked returns 204). Writes a negative Valkey cache entry so revocation is effective within milliseconds.
+         * Delete an API key
+         * @description Permanently deletes an API key. The key disappears from the list, can never
+         *     authenticate again, and no longer counts towards the 5-key limit. Idempotent
+         *     (deleting an unknown or already-deleted key returns 204). Purges the positive
+         *     auth-cache entry and writes a negative Valkey cache entry so the key stops
+         *     working within milliseconds.
          */
         delete: {
             parameters: {
@@ -984,7 +2436,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Revoked (or was already revoked). */
+                /** @description Deleted (or the key did not exist / was already deleted). */
                 204: {
                     headers: {
                         [name: string]: unknown;
@@ -994,227 +2446,6 @@ export interface paths {
                 401: components["responses"]["Unauthorized"];
             };
         };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/session/connect": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Connect a cloud session
-         * @description Asynchronous session provisioning. Returns the current session state — `provisioning` (202) while the broker prepares the task, `ready` (200) with a proxy endpoint when the session is reachable, or `failed` (503) with a failure reason on terminal error. The client polls this same endpoint with backoff respecting `retry_after_ms`. Idempotent per user — concurrent calls return the same session. Routed by userID in Valkey.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** @description Optional HL image version. */
-                        version?: string;
-                        /** @description Per-install device identity for the D-DEV-04 authorization gate. The broker refuses to provision for unauthorized devices (403 device_authorization_required). Absent on first connect triggers the email auth-code flow. */
-                        device_id?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Session is ready — the client can open a WebSocket to the `proxy_endpoint`. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SessionConnectResponse"];
-                    };
-                };
-                /** @description Session is provisioning — retry after `retry_after_ms` milliseconds. */
-                202: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SessionConnectResponse"];
-                    };
-                };
-                401: components["responses"]["Unauthorized"];
-                /** @description Device authorization required — the connecting device must complete the email auth-code flow before a session can be provisioned. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {string} */
-                            error?: "device_authorization_required";
-                        };
-                    };
-                };
-                /** @description A data purge is in progress for this user — connecting is blocked until it completes. */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            /** @enum {string} */
-                            error?: "purge_in_progress";
-                            retry_after_ms?: number;
-                        };
-                    };
-                };
-                429: components["responses"]["RateLimited"];
-                /** @description Session provisioning failed — see `failure_reason`. */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SessionConnectResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/session/disconnect": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Disconnect a cloud session (enter grace period)
-         * @description Transitions the session to a 5-minute grace period, then schedules cleanup.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        /** Format: uuid */
-                        session_id?: string;
-                        reason?: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Grace period entered. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SessionDisconnectResponse"];
-                    };
-                };
-                401: components["responses"]["Unauthorized"];
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/session/connected": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report session connected (proxy → broker)
-         * @description Called by the conduct proxy when the WebSocket upgrade completes; cancels the connect timeout.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Connected acknowledged. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SessionConnectedResponse"];
-                    };
-                };
-                401: components["responses"]["Unauthorized"];
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/session/data/delete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Purge all cloud-side engine data for the authenticated user (async)
-         * @description Starts an asynchronous purge: hard-kills any live session for the user (force-stop, no graceful snapshot upload), then permanently deletes ALL versions of the user's engine data from the sessions bucket (sync DB + RAG vectors), removes the user's autonomy beat schedule, and deletes the per-user encryption key — all in the background. Requires typed confirmation. Returns 202 Accepted immediately with a request_id; poll GET /v1/session/data/delete/status for the terminal outcome ("deleted" with counters, or "failed"). Idempotent — a second call after a completed purge restarts an empty (zero-count) purge. While a purge is in flight, /v1/session/connect returns 409 purge_in_progress. The purge holds the snapshot lease before it starts; a contended lease returns 409 snapshot_busy (the client auto-retries).
-         */
-        post: operations["deleteSessionData"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/session/data/delete/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Poll the status of the authenticated user's data purge
-         * @description Reports the current purge state. 200 always (after auth) with one of four shapes: in_progress (flag set — purge active or stalled, with phase/request_id/attempts), deleted (terminal success, with the S3 / beat / DEK counters from the result tombstone), failed (terminal failure — the sweeper gave up; the user is unblocked but the data was not guaranteed deleted; retry the delete), or none (nothing running or remembered). Flag presence wins over the terminal tombstone: while a failed run is still flagged for the sweeper the report stays in_progress.
-         */
-        get: operations["getSessionDataDeleteStatus"];
-        put?: never;
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1273,9 +2504,8 @@ export interface paths {
         /**
          * Register or refresh a device
          * @description Registers a client install (or refreshes an existing one, e.g. a new
-         *     push token). Devices must be authorized before cloud sessions can be
-         *     provisioned for them — see `/v1/session/connect` (403
-         *     `device_authorization_required`) and the `/v1/devices/authorize` flow.
+         *     push token). Devices are authorized via the `/v1/devices/authorize`
+         *     email auth-code flow.
          */
         post: operations["registerDevice"];
         delete?: never;
@@ -1359,6 +2589,202 @@ export interface paths {
          */
         get: operations["getDeviceAuthorizationStatus"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/sync-pairing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a single-use sync pairing token
+         * @description Mints a short-lived (5 min), single-use token binding (user, device, dataset). The engine presents it to the sync-relay at first connect (WebSocket `?pairing=` or POST /v1/sync/pairing/consume) to join a dataset group. The device must belong to the caller and be authorized.
+         */
+        post: operations["mintSyncPairingToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/enrollment-grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a single-use delegated-enrollment grant
+         * @description Mints a short-lived (5 min), single-use grant that lets an already-authorized device (the desktop vouches) enroll a NEW device into the same account. The minting device must belong to the caller and be authorized. The grant is shown ONCE (only its SHA-256 is stored). Requires an interactive session — API keys are refused.
+         */
+        post: operations["mintEnrollmentGrant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/connect-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a poll-only engine sign-in (connect session)
+         * @description Public (the engine is not authenticated yet). Mints an unguessable connect_id + a once-shown 256-bit session_secret (SHA-256 at rest) and returns the portal URL the engine opens in the system browser. The user signs in there and clicks Allow; the engine then polls GET /v1/devices/connect-session/{connect_id} with the secret.
+         */
+        post: operations["createDeviceConnectSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/connect-session/{connect_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Poll a connect session (auth = the session_secret)
+         * @description The engine polls this with `Authorization: Bearer <session_secret>`. A pending session returns `{"status":"pending"}`; an approved one returns the token pair EXACTLY ONCE (`{"status":"approved","token":…, "refresh_token":…,"expires_at":…}`) and is marked consumed; later polls return `{"status":"consumed"}`; an expired session returns `{"status":"expired"}`.
+         */
+        get: operations["getDeviceConnectSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/connect-session/{connect_id}/meta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read connect-session metadata (no secret)
+         * @description No-secret read for the portal page: the device name to render plus the current status. The connect_id is a 128-bit unguessable UUID.
+         */
+        get: operations["getDeviceConnectSessionMeta"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/devices/connect-session/{connect_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a connect session (the portal Allow click)
+         * @description Portal (interactive) auth ONLY — API keys are refused. The Allow click is the consent: it registers the device authorized=true and stores the freshly issued token pair (encrypted) for one-time retrieval by the engine's poll. Idempotent once approved.
+         */
+        post: operations["approveDeviceConnectSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sync/pairing/consume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem a single-use sync pairing token
+         * @description Atomically consumes a pairing token and joins the caller's device to the dataset group (enforcing the tier `sync_devices` limit). A token can be consumed exactly once.
+         */
+        post: operations["consumeSyncPairingToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sync/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the caller's sync buffer + quota status */
+        get: operations["getSyncStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backup/objects/{sha256}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch an opaque backup object by its SHA-256 */
+        get: operations["getBackupObject"];
+        /**
+         * Store an opaque, content-addressed backup object (7-5)
+         * @description Body is an opaque, already-encrypted AEAD blob. The relay verifies only the SHA-256 address (integrity), never the content. Enforces the tier `backup_storage_mb` cap.
+         */
+        put: operations["putBackupObject"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backup/manifest/{device}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch an opaque per-device backup manifest */
+        get: operations["getBackupManifest"];
+        /** Store an opaque per-device backup manifest (7-5) */
+        put: operations["putBackupManifest"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2097,8 +3523,8 @@ export interface paths {
          *     and **no image model is present in the catalog**. Requests will fail
          *     (gateway timeout or 5xx). This endpoint will be re-enabled once an
          *     image backend (ComfyUI on Salad) is deployed. Quota enforcement order
-         *     (when re-enabled): auth+tier → rate limit → tier daily cap → Soul
-         *     Credits → 402.
+         *     (when re-enabled): auth+tier → rate limit → tier daily cap → coins →
+         *     402.
          */
         post: {
             parameters: {
@@ -2113,7 +3539,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Quota exceeded (when re-enabled — upgrade or buy Soul Credits). */
+                /** @description Quota exceeded (when re-enabled — upgrade or buy coins). */
                 402: {
                     headers: {
                         [name: string]: unknown;
@@ -2164,14 +3590,16 @@ export interface components {
         /**
          * @description Error envelope. The exact field set varies slightly by service:
          *       * Inference gateway: `{ "error": "<code>", "message": "<text>" }`
-         *       * Auth-service:      `{ "error": "<message>" }`
-         *       * Session-broker:    `{ "error_code": "<code>", "message": "<text>" }`
+         *       * Auth-service:      `{ "error": "<message>" }` — errors that need
+         *         client branching (e.g. the device-auth flow) instead use the
+         *         gateway shape: `{ "error": "<code>", "message": "<text>" }`
+         *         with a stable code such as `device_not_registered`.
          *     All variants validate against this schema (extra fields allowed).
          */
         Error: {
-            /** @description Error code (inference/session) OR message (auth-service). */
+            /** @description Error code (inference) OR message (auth-service). */
             error?: string;
-            /** @description Error code (session-broker variant). */
+            /** @description Machine-readable error code (where the service emits one). */
             error_code?: string;
             /** @description Human-readable message. */
             message?: string;
@@ -2184,12 +3612,79 @@ export interface components {
             current_tier?: string;
             /** @description Present on 402 — the minimum tier required. */
             required_tier?: string;
-            /** @description Present on 402 — remaining Soul Credits. */
-            soul_credits_available?: number;
+            /** @description Present on 402 — remaining coins. */
+            coins_available?: number;
             /** @description Present on 504 gateway_timeout — for debugging. */
             task_id?: string;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * @description The client-wrapped backup DEK (2-6's W1 wrap), base64-encoded. The
+         *     backend never sees key material — it escrows the opaque blob under a
+         *     KMS-managed KEK. Scope is deliberately narrow: blob only, ≤1 KiB
+         *     decoded; there is no field for anything else.
+         */
+        BackupKeyPutRequest: {
+            /**
+             * Format: byte
+             * @description Base64-encoded, client-wrapped backup-key blob (≤1 KiB decoded).
+             */
+            wrapped_key: string;
+        };
+        BackupKeyResponse: {
+            /**
+             * Format: byte
+             * @description The escrowed wrapped-key blob, base64-encoded.
+             */
+            wrapped_key: string;
+            updated_at: components["schemas"]["RFC3339Timestamp"];
+        };
+        BackupKeyStatus: {
+            /** @enum {string} */
+            status: "stored" | "deleted";
+            updated_at?: components["schemas"]["RFC3339Timestamp"];
+        };
+        /**
+         * @description The client-wrapped sync-group key (7-2), base64-encoded. The backend
+         *     never sees key material — it escrows the opaque blob under a KMS-managed
+         *     KEK. Scope is deliberately narrow: blob only, ≤1 KiB decoded; there is
+         *     no field for anything else.
+         */
+        SyncKeyPutRequest: {
+            /**
+             * Format: byte
+             * @description Base64-encoded, client-wrapped sync-group-key blob (≤1 KiB decoded).
+             */
+            wrapped_key: string;
+        };
+        SyncKeyResponse: {
+            /**
+             * Format: byte
+             * @description The escrowed wrapped sync-group-key blob, base64-encoded.
+             */
+            wrapped_key: string;
+        };
+        SyncKeyStatus: {
+            /** @enum {string} */
+            status: "stored" | "deleted";
+            updated_at?: components["schemas"]["RFC3339Timestamp"];
+        };
+        /**
+         * @description Sets the account's sync rotation-required flag. The portal sets
+         *     `required: true` ("Reset sync key"); `required: false` clears it (same as
+         *     DELETE).
+         */
+        SyncRotationPutRequest: {
+            required: boolean;
+        };
+        /**
+         * @description Whether a sync-key rotation is pending for the account. Defaults to
+         *     `false` (no row ⇒ not required).
+         */
+        SyncRotationStatus: {
+            /** @description True when the portal has flagged a rotation the app must drive. */
+            required: boolean;
         };
         /** @description Issued on successful login/register-verify/refresh/OAuth. The `expires_at` field lets clients schedule proactive PASETO refresh without decoding the encrypted v4.local payload. */
         TokenResponse: {
@@ -2205,8 +3700,86 @@ export interface components {
             /** Format: email */
             email: string;
             display_name: string;
+            /** @description User profile picture as a data URL (`data:image/...;base64,...`) or external URL. Empty string when unset. */
+            avatar_url: string;
             email_verified: boolean;
             created_at: components["schemas"]["RFC3339Timestamp"];
+            /**
+             * @description Whether the account has a password set. Accounts created via
+             *     Google/Apple Sign-In have no password; clients use this to render a
+             *     "Set Password" flow instead of "Change Password".
+             *
+             *     This is also the gate for the two guarded account operations:
+             *     email change and provider unlink both refuse with
+             *     `403 password_required` while it is false, because a password-less
+             *     account's only credential is the provider link.
+             */
+            has_password: boolean;
+            /**
+             * Format: email
+             * @description The address the account used before its most recent email change. Absent until one has happened.
+             */
+            previous_email?: string | null;
+            /** @description When the most recent email change was committed. */
+            email_changed_at?: components["schemas"]["RFC3339Timestamp"] | null;
+        };
+        EmailChangeStatus: {
+            /** @description True while a non-expired change is staged. */
+            pending: boolean;
+            /**
+             * Format: email
+             * @description The address being moved to. Omitted when no change is pending.
+             */
+            new_email?: string;
+            /** @description True between stages 2 and 3 — the new address has not confirmed yet. */
+            awaiting_new_confirmation: boolean;
+            /** @description True between stages 3 and 5 — the approval email has been sent to the current address. */
+            awaiting_old_confirmation: boolean;
+            expires_at?: components["schemas"]["RFC3339Timestamp"];
+        };
+        /** @description One OAuth sign-in method attached to the account. */
+        LinkedIdentity: {
+            /** @enum {string} */
+            provider: "google" | "apple";
+            created_at: components["schemas"]["RFC3339Timestamp"];
+        };
+        /**
+         * @description One signed-in session (one device or browser). A session is created per
+         *     sign-in and survives token rotation, so this list shows every place the
+         *     account is currently signed in.
+         */
+        SessionListItem: {
+            /**
+             * Format: uuid
+             * @description Session identifier (stable across token refreshes).
+             */
+            session_id: string;
+            /**
+             * @description True for the session that issued the requesting token. The portal
+             *     labels it and does not offer to sign it out (use sign out instead).
+             */
+            current: boolean;
+            /**
+             * @description Derived from the client User-Agent.
+             * @enum {string}
+             */
+            platform: "android" | "ios" | "web" | "unknown";
+            /** @description Raw User-Agent recorded for the session. Omitted when unavailable. */
+            user_agent?: string;
+            /** @description Client IP at creation, or the most recent one observed. Omitted when unavailable. */
+            ip_address?: string;
+            created_at: components["schemas"]["RFC3339Timestamp"];
+            /** @description Most recent activity seen for this session (falls back to `created_at`). */
+            last_active_at: components["schemas"]["RFC3339Timestamp"];
+            expires_at: components["schemas"]["RFC3339Timestamp"];
+        };
+        SessionListResponse: {
+            sessions: components["schemas"]["SessionListItem"][];
+        };
+        RevokeAllSessionsResponse: {
+            message: string;
+            /** @description Number of sessions signed out. */
+            sessions_revoked: number;
         };
         /** @description Returned ONLY at creation time. The `key` field is shown once — store it securely. */
         APIKeyCreated: {
@@ -2219,6 +3792,7 @@ export interface components {
             prefix: string;
             created_at: components["schemas"]["RFC3339Timestamp"];
         };
+        /** @description Metadata for one API key. Deleted keys are never returned, so there is no revoked/deleted field. */
         APIKeyListItem: {
             /** Format: uuid */
             id: string;
@@ -2227,77 +3801,6 @@ export interface components {
             prefix: string;
             created_at: components["schemas"]["RFC3339Timestamp"];
             last_used_at: components["schemas"]["RFC3339Timestamp"] | null;
-            revoked_at: components["schemas"]["RFC3339Timestamp"] | null;
-        };
-        SessionConnectResponse: {
-            /** Format: uuid */
-            session_id: string;
-            /** @description Conduct proxy WebSocket base URL for this session (e.g. `wss://connect.soulbits.app`). Present when status is `ready` or `active`. */
-            proxy_endpoint?: string;
-            /** @enum {string} */
-            status: "provisioning" | "ready" | "active" | "failed";
-            /** @description Milliseconds to wait before polling again. Present when status is `provisioning`. */
-            retry_after_ms?: number;
-            /** @description Human-readable failure reason. Present when status is `failed`. */
-            failure_reason?: string;
-            /** @description HL image version assigned from the warm pool. */
-            image_version?: string | null;
-        };
-        SessionDisconnectResponse: {
-            /** @enum {string} */
-            status: "grace_period";
-            grace_period_until: components["schemas"]["RFC3339Timestamp"];
-        };
-        SessionConnectedResponse: {
-            /** @enum {string} */
-            status: "connected";
-        };
-        /** @description Async purge initiation. The purge runs in the background; poll `GET /v1/session/data/delete/status` for the terminal outcome ("deleted" or "failed"). */
-        SessionDataDeleteResponse: {
-            /** @enum {string} */
-            status: "in_progress";
-            /** @description Poll identifier — echoed by the status endpoint while the run is in flight. */
-            request_id?: string;
-        };
-        SessionDataDeleteStatusResponse: {
-            /** @enum {string} */
-            status: "in_progress";
-            /** @description Coarse purge phase (kill, routing, s3, beats, dek, done). */
-            phase: string;
-            request_id: string;
-            /** @description Sweeper resume attempts so far. */
-            attempts: number;
-        } | {
-            /** @enum {string} */
-            status: "deleted";
-            request_id: string;
-            attempts: number;
-            /** @description S3 objects (incl. delete markers) removed. */
-            objects_deleted: number;
-            /** @description S3 object versions permanently removed. */
-            versions_deleted: number;
-            /** @description due:lifecycle ZSET members removed. */
-            beats_removed: number;
-            /** @description Whether the per-user encryption key was deleted. */
-            dek_deleted: boolean;
-            /** @description Unix seconds when the purge finished. */
-            finished_at: number;
-        } | {
-            /** @enum {string} */
-            status: "failed";
-            request_id: string;
-            attempts: number;
-            /** @description Failure reason (e.g. "attempt cap reached"). */
-            error: string;
-            objects_deleted: number;
-            versions_deleted: number;
-            beats_removed: number;
-            dek_deleted: boolean;
-            /** @description Unix seconds when the purge gave up. */
-            finished_at: number;
-        } | {
-            /** @enum {string} */
-            status: "none";
         };
         VersionsResponse: {
             versions: string[];
@@ -2371,6 +3874,120 @@ export interface components {
             authorized: boolean;
             /** @description True while a code/token pair is outstanding for this device. */
             authorization_pending: boolean;
+        };
+        /** @description Mint a short-lived, single-use pairing token binding (user, device, dataset). */
+        SyncPairingRequest: {
+            device_id: string;
+            /** @description The engine's dataset id (one sync group per dataset). */
+            dataset_id: string;
+        };
+        SyncPairingResponse: {
+            /** @description Opaque ~128-bit token */
+            token: string;
+            dataset_id: string;
+            device_id: string;
+            expires_at: components["schemas"]["RFC3339Timestamp"];
+        };
+        /** @description Mint a short-lived, single-use delegated-enrollment grant from an already-authorized device. */
+        EnrollmentGrantRequest: {
+            /** @description The MINTING device (the caller's, already authorized) that vouches for the new device. */
+            device_id: string;
+        };
+        /** @description The opaque grant is shown ONCE; only its SHA-256 is stored. */
+        EnrollmentGrantResponse: {
+            /** @description Opaque ≥128-bit single-use grant. */
+            grant: string;
+            /** @description Grant lifetime in seconds (300 = 5 min). */
+            expires_in: number;
+        };
+        /**
+         * @description Redeem a delegated-enrollment grant for the enrolled device's OWN
+         *     device-scoped session. NO account auth — the grant IS the credential.
+         *     The device is registered authorized because the minting device vouched
+         *     for it. Enrolled devices are full devices and may themselves mint.
+         */
+        DeviceEnrollRequest: {
+            /** @description The single-use grant from the enrollment/QR payload. */
+            grant: string;
+            /** @description Per-install device identity of the NEW device. */
+            device_id: string;
+            /** @description Display name of the new device (metadata; no server column). */
+            device_name?: string;
+            /**
+             * @description Optional; the enrolling device's platform. Defaults to `android` when omitted.
+             * @enum {string}
+             */
+            platform?: "android" | "ios" | "web";
+        };
+        /** @description The engine announces itself. Public — the engine is not authenticated yet; the portal signs the user in and approves. */
+        DeviceConnectSessionRequest: {
+            /** @description Per-install identity of the desktop engine. */
+            device_id: string;
+            /** @description Display name (e.g. "Studio-PC"). */
+            device_name?: string;
+            /**
+             * @description Optional; recorded on the approved device row. Defaults to `web`.
+             * @enum {string}
+             */
+            platform?: "android" | "ios" | "web";
+        };
+        /** @description `session_secret` is shown ONCE (only its SHA-256 is stored). `connect_url` is the portal URL the engine opens in the system browser. */
+        DeviceConnectSessionResponse: {
+            /** @description UUID identifying the connect session. */
+            connect_id: string;
+            /** @description 43-char base64url 256-bit secret; the Bearer credential for the status poll. */
+            session_secret: string;
+            /** @description Absolute portal URL: <PORTAL_BASE_URL>/connect?request=<connect_id>. */
+            connect_url: string;
+            /** @description Lifetime in seconds (600 = 10 min). */
+            expires_in: number;
+        };
+        /** @description `status` is one of `pending|approved|consumed|expired`. The token fields are populated ONLY on the `approved` transition and returned exactly once — the row is marked consumed in the same statement. */
+        DeviceConnectStatusResponse: {
+            /** @enum {string} */
+            status: "pending" | "approved" | "consumed" | "expired";
+            /** @description PASETO session token (approved only, once). */
+            token?: string;
+            /** @description Opaque refresh token (approved only, once). */
+            refresh_token?: string;
+            expires_at?: components["schemas"]["RFC3339Timestamp"];
+        };
+        /** @description No-secret metadata read for the portal page (device name + status). */
+        DeviceConnectMetaResponse: {
+            device_name: string;
+            /** @enum {string} */
+            status: "pending" | "approved" | "consumed" | "expired";
+        };
+        DeviceConnectApproveResponse: {
+            /** @enum {string} */
+            status: "ok";
+        };
+        /** @description Per-tier sync-relay quotas. */
+        SyncQuotas: {
+            /** @description Offline-buffer byte cap (MB). */
+            sync_buffer_mb?: number;
+            /** @description Max devices in one sync group. */
+            sync_devices?: number;
+            /** @description Backup blob storage cap (MB). */
+            backup_storage_mb?: number;
+        };
+        SyncStatus: {
+            dataset_id?: string;
+            device_id?: string;
+            connected_devices?: number;
+            buffered_frames?: number;
+            buffered_bytes?: number;
+            buffer_cap_bytes?: number;
+            last_acked_seq?: number;
+            /** @description True when the buffer dropped oldest frames (engine re-baselines). */
+            overflow?: boolean;
+            backup_bytes?: number;
+            quotas?: components["schemas"]["SyncQuotas"];
+        };
+        BackupPutResponse: {
+            sha256?: string;
+            size?: number;
+            device_id?: string;
         };
         /** @description Per-tier rate/quota limits. `null` means unlimited/not applicable. */
         TierLimits: {
@@ -2812,7 +4429,7 @@ export interface components {
         };
     };
     responses: {
-        /** @description Error response. Inference gateway shape: `{"error":"<code>","message":"<text>"}`. Auth-service shape: `{"error":"<message>"}`. Session-broker shape: `{"error_code":"<code>","message":"<text>"}`. */
+        /** @description Error response. Inference gateway shape: `{"error":"<code>","message":"<text>"}`. Auth-service shape: `{"error":"<message>"}`. */
         StandardError: {
             headers: {
                 [name: string]: unknown;
@@ -2895,7 +4512,7 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    deleteSessionData: {
+    enrollDevice: {
         parameters: {
             query?: never;
             header?: never;
@@ -2904,96 +4521,30 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": {
-                    /**
-                     * @description Typed confirmation guard against accidental calls.
-                     * @enum {string}
-                     */
-                    confirm: "DELETE";
-                };
+                "application/json": components["schemas"]["DeviceEnrollRequest"];
             };
         };
         responses: {
-            /** @description Already in progress by another request — the same in_progress shape as 202. */
+            /** @description Enrolled; device-scoped session issued. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionDataDeleteResponse"];
+                    "application/json": components["schemas"]["TokenResponse"];
                 };
             };
-            /** @description Purge accepted and running in the background. Poll GET /v1/session/data/delete/status with the request_id. */
-            202: {
+            400: components["responses"]["StandardError"];
+            /** @description Invalid, expired, or already-used grant — `error: enrollment_grant_invalid`. */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionDataDeleteResponse"];
-                };
-            };
-            /** @description Missing or wrong confirmation string. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        error?: "confirmation_required";
-                    };
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            /** @description Snapshot lease busy — retry after retry_after_ms. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        error?: "snapshot_busy";
-                        retry_after_ms?: number;
-                    };
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             429: components["responses"]["RateLimited"];
-        };
-    };
-    getSessionDataDeleteStatus: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Purge state (in_progress | deleted | failed | none). */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionDataDeleteStatusResponse"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            429: components["responses"]["RateLimited"];
-            /** @description Purge state temporarily unavailable (Valkey down) — retry. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @enum {string} */
-                        error_code?: "service_unavailable";
-                        message?: string;
-                    };
-                };
-            };
         };
     };
     listDevices: {
@@ -3063,7 +4614,15 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
-            404: components["responses"]["StandardError"];
+            /** @description Device not registered for this user — `error: device_not_registered` (the app re-registers and retries once). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     authorizeDevice: {
@@ -3099,7 +4658,15 @@ export interface operations {
             };
             400: components["responses"]["StandardError"];
             401: components["responses"]["Unauthorized"];
-            404: components["responses"]["StandardError"];
+            /** @description Device not registered for this user — `error: device_not_registered` (the app re-registers and retries once). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };
@@ -3153,7 +4720,403 @@ export interface operations {
             };
             400: components["responses"]["StandardError"];
             401: components["responses"]["Unauthorized"];
+            /** @description Device not registered for this user — `error: device_not_registered` (the app re-registers and retries once). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    mintSyncPairingToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SyncPairingRequest"];
+            };
+        };
+        responses: {
+            /** @description Pairing token minted (shown once). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncPairingResponse"];
+                };
+            };
+            400: components["responses"]["StandardError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Device not authorized — `error: device_not_authorized`. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Device not registered for this user — `error: device_not_registered`. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    mintEnrollmentGrant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrollmentGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description Enrollment grant minted (shown once). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentGrantResponse"];
+                };
+            };
+            400: components["responses"]["StandardError"];
+            401: components["responses"]["Unauthorized"];
+            /** @description Minting device not authorized — `error: device_not_authorized` (API keys are also refused). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Device not registered for this user — `error: device_not_registered`. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createDeviceConnectSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceConnectSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description Connect session created (session_secret shown once). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceConnectSessionResponse"];
+                };
+            };
+            400: components["responses"]["StandardError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getDeviceConnectSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The connect_id from the create response. */
+                connect_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current connect-session state (token pair only on the approved transition). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceConnectStatusResponse"];
+                };
+            };
+            /** @description Missing or wrong session secret — `error: authentication required` / `invalid session secret`. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getDeviceConnectSessionMeta: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connect_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Device name + status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceConnectMetaResponse"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    approveDeviceConnectSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connect_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Approved ({"status":"ok"}). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceConnectApproveResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description API keys are refused — `error: API keys cannot approve connect sessions`. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description Connect session expired — `error: connect_session_expired`. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    consumeSyncPairingToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                    device_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Pairing token consumed; the device joined the dataset group. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        dataset_id?: string;
+                        device_id?: string;
+                    };
+                };
+            };
+            400: components["responses"]["StandardError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["StandardError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getSyncStatus: {
+        parameters: {
+            query: {
+                dataset_id: string;
+                device_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Buffer/quota status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncStatus"];
+                };
+            };
+            400: components["responses"]["StandardError"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getBackupObject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The object body (application/octet-stream). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["StandardError"];
+        };
+    };
+    putBackupObject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Lowercase hex SHA-256 of the object body. */
+                sha256: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Object stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupPutResponse"];
+                };
+            };
+            /** @description Invalid sha256 or checksum mismatch — `error: invalid_sha256` / `checksum_mismatch`. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            413: components["responses"]["StandardError"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getBackupManifest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The manifest body (application/octet-stream). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["StandardError"];
+        };
+    };
+    putBackupManifest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                device: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Manifest stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupPutResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            413: components["responses"]["StandardError"];
+            429: components["responses"]["RateLimited"];
         };
     };
 }

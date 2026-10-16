@@ -3,14 +3,12 @@ import { resolveOptions } from './config.js';
 import { createTransport } from './transport.js';
 import { createAccountAPI } from './account.js';
 import { createAPIKeysAPI } from './apikeys.js';
-import { createSessionAPI } from './session.js';
 import { createSubscriptionAPI } from './subscription.js';
 import { createModelsAPI } from './models.js';
 import { createInferenceAPI } from './inference.js';
 import { createDevicesAPI } from './devices.js';
 import type { AccountAPI } from './account.js';
 import type { APIKeysAPI } from './apikeys.js';
-import type { SessionAPI } from './session.js';
 import type { SubscriptionAPI } from './subscription.js';
 import type { ModelsAPI } from './models.js';
 import type { InferenceAPI } from './inference.js';
@@ -22,7 +20,6 @@ import type { DevicesAPI } from './devices.js';
  * Each property exposes a typed sub-API auto-routed to the correct host:
  * - {@link SoulbitsClient.account}        → Cloud API (auth, profile, OAuth, password)
  * - {@link SoulbitsClient.apiKeys}         → Cloud API (create / list / revoke API keys)
- * - {@link SoulbitsClient.session}         → Cloud API (HL session lifecycle)
  * - {@link SoulbitsClient.subscription}    → Cloud API (tiers / current subscription)
  * - {@link SoulbitsClient.devices}          → Cloud API (register / list / revoke / authorize devices)
  * - {@link SoulbitsClient.models}          → Inference API (public model catalog)
@@ -31,7 +28,6 @@ import type { DevicesAPI } from './devices.js';
 export interface SoulbitsClient {
   account: AccountAPI;
   apiKeys: APIKeysAPI;
-  session: SessionAPI;
   subscription: SubscriptionAPI;
   devices: DevicesAPI;
   models: ModelsAPI;
@@ -61,7 +57,6 @@ export function createClient(opts: ClientOptions = {}): SoulbitsClient {
   return {
     account: createAccountAPI(cloud),
     apiKeys: createAPIKeysAPI(cloud),
-    session: createSessionAPI(cloud),
     subscription: createSubscriptionAPI(cloud),
     devices: createDevicesAPI(cloud),
     models: createModelsAPI(inference),
